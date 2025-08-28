@@ -5,6 +5,12 @@ import AIRecipe from "../models/ai-recipe.model.js";
 import { verifyToken } from "../middleware/verify-middleware.js";
 import mongoose from "mongoose";
 import { isAuthenticated } from "../middleware/session-middleware.js";
+import {
+  deleteAIRecipe,
+  generateRecipe,
+  getAIRecipes,
+  saveAIRecipe,
+} from "../controllers/ai-recipe.controller.js";
 
 const aiRecipesRouter = Router();
 
@@ -57,73 +63,7 @@ aiRecipesRouter.get("/", (req, res) => {
  *
  *
  */
-aiRecipesRouter.post("/generate-recipes", async (req, res) => {
-  const { category, dietType, ingredients, prepTime } = req.body;
-
-  try {
-    const prompt = generateRecipePrompt(
-      category,
-      dietType,
-      ingredients,
-      prepTime
-    );
-
-    const response = await geminiModel.generateContent(prompt);
-    let responseText = await response.response.text();
-
-    responseText = responseText
-      .replace(/```json/g, "")
-      .replace(/```/g, "")
-      .trim();
-
-    let result;
-    try {
-      result = JSON.parse(responseText);
-    } catch (err) {
-      console.error("Invalid JSON from AI:", responseText);
-      return res.status(400).json({
-        message: "Invalid JSON received from AI",
-        raw: responseText,
-        error: err.message,
-      });
-    }
-
-    if (!result.recipes || !Array.isArray(result.recipes)) {
-      return res.status(400).json({
-        message: "AI did not return a valid recipes array",
-        raw: result,
-      });
-    }
-
-    for (let recipe of result.recipes) {
-      try {
-        let imageUrl = await fetchUnsplashImage(recipe.title);
-
-        if (!imageUrl && recipe.imageDescription) {
-          imageUrl = await fetchUnsplashImage(recipe.imageDescription);
-        }
-
-        recipe.imageUrl =
-          imageUrl || "https://via.placeholder.com/512?text=No+Image+Available";
-      } catch (imgErr) {
-        console.error("Error fetching Unsplash image:", imgErr.message);
-        recipe.imageUrl =
-          "https://via.placeholder.com/512?text=Image+Unavailable";
-      }
-    }
-
-    res.status(200).json({
-      message: "success",
-      recipes: result.recipes,
-    });
-  } catch (error) {
-    console.error("Recipe generation error:", error.message);
-    res.status(500).json({
-      message: "Error generating recipe",
-      error: error.message,
-    });
-  }
-});
+aiRecipesRouter.post("/generate-recipes", generateRecipe);
 
 /**
  * @swagger
@@ -157,42 +97,7 @@ aiRecipesRouter.post("/generate-recipes", async (req, res) => {
  *          description: Internal server error
  *
  */
-aiRecipesRouter.post("/save-recipe", verifyToken, async (req, res, next) => {
-  try {
-    const { recipe } = req.body;
-    const userId = req.user._id;
-
-    if (!recipe || !userId) {
-      return res.status(400).json({ message: "Recipe and User ID required" });
-    }
-
-    let exitRecipe = await AIRecipe.findOne({ title: recipe.title });
-
-    if (!exitRecipe) {
-      exitRecipe = await AIRecipe.create({
-        name: recipe.title,
-        ingredients: recipe.ingredients,
-        instructions: recipe.instructions,
-        image: recipe.imageUrl,
-        prepTime: recipe.prepTime,
-        cookTime: recipe.cookTime,
-        totalTime: recipe.totalTime,
-        diet: recipe.diet,
-        userId: [userId],
-      });
-    } else {
-      if (!exitRecipe.userId.includes(userId)) {
-        exitRecipe.userId.push(userId);
-        await exitRecipe.save();
-      }
-    }
-    res
-      .status(200)
-      .json({ message: "Recipe store successfully", recipe: exitRecipe });
-  } catch (error) {
-    next(error);
-  }
-});
+aiRecipesRouter.post("/save-recipe", verifyToken, saveAIRecipe);
 
 /** * @swagger
  * /ai/ai-recipes:
@@ -211,27 +116,34 @@ aiRecipesRouter.post("/save-recipe", verifyToken, async (req, res, next) => {
  *          description: Internal server error
  *
  */
-aiRecipesRouter.get(
-  "/ai-recipes",
-  isAuthenticated,
-  verifyToken,
-  async (req, res, next) => {
-    try {
-      const userId = req.user._id;
-      const aiRecipes = await AIRecipe.find({ userId });
-      if (!aiRecipes || aiRecipes.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "No AI generated recipes found", data: [] });
-      }
-      res.status(200).json({
-        message: "AI generated recipes fetched successfully",
-        data: aiRecipes,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
+aiRecipesRouter.get("/ai-recipes", isAuthenticated, verifyToken, getAIRecipes);
+
+/**
+ * @swagger
+ *  /ai/ai-recipes/{id}:
+ *  delete:
+ *   tags: [AI Recipe API]
+ *   summary: Delete an AI generated recipe by ID
+ *   description: Delete an AI generated recipe using its ID
+ *   security:
+ *    - bearerAuth: []
+ *   parameters:
+ *    - in: path
+ *      name: id
+ *      schema:
+ *        type: string
+ *        required: true
+ *        description: The recipe ID
+ *   responses:
+ *    200:
+ *     description: Recipe deleted successfully
+ *    401:
+ *     description: Unauthorized
+ *    404:
+ *     description: Recipe not found
+ *    500:
+ *     description: Internal server error
+ */
+aiRecipesRouter.delete("/ai-recipes/:id", verifyToken, deleteAIRecipe);
 
 export default aiRecipesRouter;
