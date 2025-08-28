@@ -10,9 +10,9 @@ import authRouter from "./routes/auth.routes.js";
 import passport from "passport";
 import session from "express-session";
 import { JWT_SECRET } from "./config/env.js";
-import aiRecipesRouter from "./routes/ai-recipes.routes.js";
+import aiRecipesRouter from "./routes/ai-recipes.routes.js";  
 
-const app = express();
+const app = express(); 
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
